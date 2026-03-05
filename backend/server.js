@@ -7,12 +7,16 @@ dotenv.config();
 
 const app = express();
 
-// CORS — allow all origins in dev; in production Vercel handles this
+// CORS — allow all origins
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST', 'DELETE'],
-  allowedHeaders: ['Content-Type'],
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Handle preflight for all routes
+app.options('*', cors());
+
 app.use(express.json());
 
 // Routes
@@ -24,7 +28,7 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'Expense Tracker API is running 🚀' });
 });
 
-// MongoDB connection (cached for serverless reuse)
+// ── MongoDB connection (cached for serverless reuse) ──────────────────────────
 let isConnected = false;
 
 async function connectDB() {
@@ -34,7 +38,7 @@ async function connectDB() {
   console.log('✅ Connected to MongoDB');
 }
 
-// For local development — start Express server normally  
+// ── Local development ─────────────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5001;
   connectDB()
@@ -49,12 +53,26 @@ if (process.env.NODE_ENV !== 'production') {
     });
 }
 
-// For Vercel serverless — connect on each cold start, then handle request
+// ── Vercel Serverless Handler ─────────────────────────────────────────────────
+// IMPORTANT: Set CORS headers FIRST before any async work, so preflight
+// OPTIONS requests always get the right headers even if DB is slow.
 module.exports = async (req, res) => {
+  // Always set CORS headers immediately
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Respond to preflight immediately — no DB needed
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  // Connect to DB, then hand off to Express app
   try {
     await connectDB();
   } catch (err) {
     return res.status(500).json({ message: 'DB connection failed', error: err.message });
   }
+
   return app(req, res);
 };
